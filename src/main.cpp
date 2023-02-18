@@ -1,39 +1,7 @@
-/* Central Mode (client) BLE UART for ESP32
- *
- * This sketch is a central mode (client) Nordic UART Service (NUS) that connects automatically to a peripheral (server)
- * Nordic UART Service. NUS is what most typical "blueart" servers emulate. This sketch will connect to your BLE uart
- * device in the same manner the nRF Connect app does.
- *
- * Once connected this sketch will switch notification on using BLE2902 for the charUUID_TX characteristic which is the
- * characteristic that our server is making data available on via notification. The data received from the server
- * characteristic charUUID_TX will be printed to Serial on this device. Every five seconds this device will send the
- * string "Time since boot: #" to the server characteristic charUUID_RX, this will make that data available in the BLE
- * uart and trigger a notifyCallback or similar depending on your BLE uart server setup.
- *
- *
- * A brief explanation of BLE client/server actions and rolls:
- *
- * Central Mode (client) - Connects to a peripheral (server).
- *   -Scans for devices and reads service UUID.
- *   -Connects to a server's address with the desired service UUID.
- *   -Checks for and makes a reference to one or more characteristic UUID in the current service.
- *   -The client can send data to the server by writing to this RX Characteristic.
- *   -If the client has enabled notifications for the TX characteristic, the server can send data to the client as
- *   notifications to that characteristic. This will trigger the notifyCallback function.
- *
- * Peripheral (server) - Accepts connections from a central mode device (client).
- *   -Advertises a service UUID.
- *   -Creates one or more characteristic for the advertised service UUID
- *   -Accepts connections from a client.
- *   -The server can send data to the client by writing to this TX Characteristic.
- *   -If the server has enabled notifications for the RX characteristic, the client can send data to the server as
- *   notifications to that characteristic. This the default function on most "Nordic UART Service" BLE uart sketches.
- */
-
 #include <Arduino.h>
 #include "BLEDevice.h"
 
-static const char *LOG_TAG = "example";
+static const char *LOG_TAG = "RECEIVER";
 
 // The remote Nordic UART service service we wish to connect to.
 // This service exposes two characteristics: one for transmitting and one for receiving (as seen from the client).
@@ -59,28 +27,28 @@ static void notifyCallback(
     size_t length,
     bool isNotify)
 {
-  Serial.println("Notify callback for TX characteristic received. Data:");
-  for (int i = 0; i < length; i++)
-  {
-    // Serial.print((char)pData[i]);     // Print character to uart
-    Serial.print(pData[i], HEX); // print raw data to uart
-    Serial.print(" ");
-  }
-  Serial.println();
+  Serial.write(pData, length);
 }
 
 class MyClientCallback : public BLEClientCallbacks
 {
   void onConnect(BLEClient *pclient)
   {
+#ifdef CFG_DEBUG
+    Serial.println("MyClientCallback::onConnect");
+#endif
   }
 
   void onDisconnect(BLEClient *pclient)
   {
     connected = false;
-    Serial.println("onDisconnect");
+#ifdef CFG_DEBUG
+    Serial.println("MyClientCallback::onDisconnect");
+#endif
   }
 };
+
+#ifdef CFG_DEBUG
 
 static void my_gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param)
 {
@@ -102,13 +70,16 @@ static void my_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_pa
   ESP_LOGI(LOG_TAG, "custom gap event handler, event: %d", (uint8_t)event);
 }
 
+#endif
+
 bool connectToServer()
 {
+#ifdef CFG_DEBUG
   Serial.print("Establishing a connection to device address: ");
   Serial.println(myDevice->getAddress().toString().c_str());
+#endif
 
   BLEClient *pClient = BLEDevice::createClient();
-  Serial.println(" - Created client");
 
   pClient->setClientCallbacks(new MyClientCallback());
 
@@ -116,37 +87,33 @@ bool connectToServer()
   auto connectionOk = pClient->connect(myDevice);
   if (!connectionOk)
   {
-    Serial.println("Failed to connect to server");
     return false;
   }
-  Serial.println(" - Connected to server");
 
   // Obtain a reference to the Nordic UART service on the remote BLE server.
   BLERemoteService *pRemoteService = pClient->getService(serviceUUID);
   if (pRemoteService == nullptr)
   {
-    Serial.print("Failed to find Nordic UART service UUID: ");
-    Serial.println(serviceUUID.toString().c_str());
     pClient->disconnect();
     return false;
   }
-  Serial.println(" - Remote BLE service reference established");
 
   // Obtain a reference to the TX characteristic of the Nordic UART service on the remote BLE server.
   pTXCharacteristic = pRemoteService->getCharacteristic(charUUID_TX);
   if (pTXCharacteristic == nullptr)
   {
-    Serial.print("Failed to find TX characteristic UUID: ");
-    Serial.println(charUUID_TX.toString().c_str());
     pClient->disconnect();
     return false;
   }
+
+#ifdef CFG_DEBUG
   Serial.println(" - Remote BLE TX characteristic reference established");
 
   // Read the value of the TX characteristic.
   std::string value = pTXCharacteristic->readValue();
   Serial.print("The characteristic value is currently: ");
   Serial.println(value.c_str());
+#endif
 
   pTXCharacteristic->registerForNotify(notifyCallback);
 
@@ -154,15 +121,15 @@ bool connectToServer()
   pRXCharacteristic = pRemoteService->getCharacteristic(charUUID_RX);
   if (pRXCharacteristic == nullptr)
   {
-    Serial.print("Failed to find our characteristic UUID: ");
-    Serial.println(charUUID_RX.toString().c_str());
     return false;
   }
-  Serial.println(" - Remote BLE RX characteristic reference established");
+#ifdef CFG_DEBUG
 
+  Serial.println(" - Remote BLE RX characteristic reference established");
   // Write to the the RX characteristic.
   String helloValue = "Hello Remote Server";
   pRXCharacteristic->writeValue(helloValue.c_str(), helloValue.length());
+#endif
 
   connected = true;
   return true;
@@ -178,14 +145,18 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
   */
   void onResult(BLEAdvertisedDevice advertisedDevice)
   {
+#ifdef CFG_DEBUG
     Serial.print("BLE Advertised Device found - ");
     Serial.println(advertisedDevice.toString().c_str());
+#endif
 
     // We have found a device, check to see if it contains the Nordic UART service.
     if (advertisedDevice.haveServiceUUID() && advertisedDevice.getServiceUUID().equals(serviceUUID))
     {
-
+#ifdef CFG_DEBUG
       Serial.println("Found a device with the desired ServiceUUID!");
+#endif
+
       BLEDevice::getScan()->stop();
       myDevice = new BLEAdvertisedDevice(advertisedDevice);
       doConnect = true;
@@ -194,31 +165,38 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
   }   // onResult
 };    // MyAdvertisedDeviceCallbacks
 
-void setup()
+/*
+ * Retrieve a Scanner and set the callback we want to use to be informed when we
+ * have detected a new device. Specify that we want active scanning and start the
+ * scan to run for 30 seconds.
+ */
+void scanForBLEServer()
 {
-  Serial.begin(115200);
-  Serial.println("Starting Arduino BLE Central Mode (Client) Nordic UART Service");
-
-  BLEDevice::setCustomGapHandler(my_gap_event_handler);
-  BLEDevice::setCustomGattsHandler(my_gatts_event_handler);
-  BLEDevice::setCustomGattcHandler(my_gattc_event_handler);
-
-  BLEDevice::init("name");
-
-  // Retrieve a Scanner and set the callback we want to use to be informed when we
-  // have detected a new device. Specify that we want active scanning and start the
-  // scan to run for 30 seconds.
   BLEScan *pBLEScan = BLEDevice::getScan();
   pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
   pBLEScan->setInterval(2000);
   pBLEScan->setWindow(1500);
   pBLEScan->setActiveScan(true);
-  pBLEScan->start(20);
-} // End of setup.
+  pBLEScan->start(30, false);
+}
 
-const uint8_t notificationOff[] = {0x0, 0x0};
-const uint8_t notificationOn[] = {0x1, 0x0};
-bool onoff = true;
+void setup()
+{
+  Serial.begin(115200);
+#ifdef CFG_DEBUG
+  Serial.println("Starting Haptica BLE Central Receiver based on Nordic UART Service");
+#endif
+
+#ifdef CFG_DEBUG
+  BLEDevice::setCustomGapHandler(my_gap_event_handler);
+  BLEDevice::setCustomGattsHandler(my_gatts_event_handler);
+  BLEDevice::setCustomGattcHandler(my_gattc_event_handler);
+#endif
+
+  BLEDevice::init("Haptica Receiver");
+
+  scanForBLEServer();
+} // End of setup.
 
 void loop()
 {
@@ -230,38 +208,22 @@ void loop()
   {
     if (connectToServer())
     {
+#ifdef CFG_DEBUG
       Serial.println("We are now connected to the BLE Server.");
+#endif
+      doConnect = false;
     }
     else
     {
-      Serial.println("We have failed to connect to the server; there is nothin more we will do.");
+#ifdef CFG_DEBUG
+      Serial.println("We have failed to connect to the server; we will retry.");
+#endif
+      doConnect = false;
+      scanForBLEServer();
     }
-    doConnect = false;
   }
-
-  // If we are connected to a peer BLE Server perform the following actions every five seconds:
-  //   Toggle notifications for the TX Characteristic on and off.
-  //   Update the RX characteristic with the current time since boot string.
-  if (connected)
+  if (!connected)
   {
-    // if (onoff)
-    // {
-    //   Serial.println("Notifications turned on");
-    //   pTXCharacteristic->getDescriptor(BLEUUID((uint16_t)0x2902))->writeValue((uint8_t *)notificationOn, 2, true);
-    // }
-    // else
-    // {
-    //   Serial.println("Notifications turned off");
-    //   pTXCharacteristic->getDescriptor(BLEUUID((uint16_t)0x2902))->writeValue((uint8_t *)notificationOff, 2, true);
-    // }
-
-    // // Toggle on/off value for notifications.
-    // onoff = onoff ? 0 : 1;
-
-    // Set the characteristic's value to be the array of bytes that is actually a string
-    // String timeSinceBoot = "Time since boot: " + String(millis() / 1000);
-    // pRXCharacteristic->writeValue(timeSinceBoot.c_str(), timeSinceBoot.length());
+    scanForBLEServer();
   }
-
-  delay(5000); // Delay five seconds between loops.
 } // End of loop
