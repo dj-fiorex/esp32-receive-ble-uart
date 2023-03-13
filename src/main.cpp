@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include "BLEDevice.h"
 
+#define LED_BUILTIN 19
+
 static const char *LOG_TAG = "RECEIVER";
 
 // The remote Nordic UART service service we wish to connect to.
@@ -37,6 +39,7 @@ class MyClientCallback : public BLEClientCallbacks
 #ifdef CFG_DEBUG
     Serial.println("MyClientCallback::onConnect");
 #endif
+    digitalWrite(LED_BUILTIN, HIGH); // turn the LED on (HIGH is the voltage level)
   }
 
   void onDisconnect(BLEClient *pclient)
@@ -45,6 +48,7 @@ class MyClientCallback : public BLEClientCallbacks
 #ifdef CFG_DEBUG
     Serial.println("MyClientCallback::onDisconnect");
 #endif
+    digitalWrite(LED_BUILTIN, LOW); // turn the LED on (HIGH is the voltage level)
   }
 };
 
@@ -192,6 +196,11 @@ void setup()
   BLEDevice::setCustomGattsHandler(my_gatts_event_handler);
   BLEDevice::setCustomGattcHandler(my_gattc_event_handler);
 #endif
+
+  // initialize digital pin LED_BUILTIN as an output.
+  pinMode(LED_BUILTIN, OUTPUT);
+
+  digitalWrite(LED_BUILTIN, LOW); // turn the LED on (HIGH is the voltage level)
 
   BLEDevice::init("Haptica Receiver");
 
